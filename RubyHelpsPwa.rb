@@ -64,71 +64,31 @@ def get_latest_data
   [global_schema, vuis, vui_map]
 end
 
-# --- 3. REVISED FILE WRITER ---
+# --- 3. FILE WRITER ---
 def apply_changes(changes)
   backup = "#{TARGET_FILE}.#{Time.now.strftime('%H%M%S')}.bak"
   FileUtils.cp(TARGET_FILE, backup)
   
-  # Read the file as an array of lines
   lines = File.readlines(TARGET_FILE, encoding: "UTF-8")
-  
   changes.each do |change|
-    f_id = change["field"]
-    p_id = change["parent"]
-    v_id = change["vui"]
-
-    # The exact string we want to ensure exists
-    new_line = "   display-instance : \"#{v_id}\\\\170\\\\40\\\\#{p_id}\\\\231\\\\6\\\\0\\\\\"\n"
+    f_id = change["field"]; p_id = change["parent"]; v_id = change["vui"]
+    new_line = "    display-instance : \"#{v_id}\\\\170\\\\40\\\\#{p_id}\"\n"
     
-    in_field = false
-    vui_entry_updated = false
-    insert_pos = nil
-
+    inside = false
     lines.each_with_index do |line, idx|
-      # 1. Identify if we are inside the correct field block
       if line =~ /^field\s+\{/
-        # Look ahead a few lines to check ID without moving the main index
-        is_match = false
-        (idx+1..idx+10).each do |check_idx|
-          break if lines[check_idx].nil? || lines[check_idx] =~ /^(field|vui)\s+\{/
-          if lines[check_idx] =~ /^\s+id\s+:\s+#{f_id}\b/
-            is_match = true
-            break
-          end
+        j = idx + 1
+        while lines[j] && lines[j] !~ /^(field|vui)\s+\{/
+          (inside = true; break) if lines[j] =~ /^\s+id\s+:\s+#{f_id}\b/
+          j += 1
         end
-        in_field = is_match
       end
-
-      if in_field
-        # 2. Look for an existing entry for THIS specific VUI
-        # It must start with the VUI ID followed by the \170 (parentage) marker
-        if line =~ /^\s+display-instance\s+:\s+"#{v_id}\\\\170/
-          lines[idx] = new_line
-          vui_entry_updated = true
-        end
-
-        # 3. Track the best place to insert if the VUI entry is missing
-        # Priority: Right before object-prop
-        if line =~ /^\s+object-prop\s+:/
-          insert_pos = idx
-        end
-
-        # 4. End of field block
-        if line =~ /^\}/
-          # If we haven't updated an existing line, insert the new one
-          if !vui_entry_updated
-            # Insert before object-prop, or if missing, right before the closing brace
-            final_pos = insert_pos || idx
-            lines.insert(final_pos, new_line)
-          end
-          in_field = false
-          insert_pos = nil
-          break # Change applied, stop searching for this field
-        end
+      if inside && line =~ /^\}/
+        lines.insert(idx, new_line)
+        inside = false; break
       end
     end
   end
-  
   File.write(TARGET_FILE, lines.join)
   backup
 end
